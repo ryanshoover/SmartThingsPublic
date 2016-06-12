@@ -89,7 +89,7 @@ mappings {
 }
 
 def getServerUrl() { return "https://graph.api.smartthings.com" }
-def getCallbackUrl() { "https://graph.api.smartthings.com/oauth/callback" }
+def getServercallbackUrl() { "https://graph.api.smartthings.com/oauth/callback" }
 def getBuildRedirectUrl() { "${serverUrl}/oauth/initialize?appId=${app.id}&access_token=${state.accessToken}&apiServerUrl=${apiServerUrl}" }
 
 def authPage() {
@@ -166,7 +166,7 @@ def callback() {
 
 def init() {
 	log.debug "Requesting Code"
-	def oauthParams = [client_id: "${appSettings.clientId}", scope: "remote", response_type: "code", redirect_uri: "${callbackUrl}" ]
+	def oauthParams = [client_id: "${appSettings.clientId}", scope: "remote", response_type: "code", redirect_uri: "${servercallbackUrl}" ]
 	redirect(location: "https://home.myharmony.com/oauth2/authorize?${toQueryString(oauthParams)}")
 }
 
@@ -339,7 +339,7 @@ def initialize() {
 	state.aux = 0
 	if (selectedhubs || selectedactivities) {
 		addDevice()
-        runEvery5Minutes("discovery")
+        runEvery5Minutes("poll")
 	}
 }
 
@@ -394,9 +394,9 @@ def discovery() {
         }
 	} catch (java.net.SocketTimeoutException e) {
 		log.warn "Connection to the hub timed out. Please restart the hub and try again."
-        state.resethub = true
+    state.resethub = true
  	} catch (e) {
-		log.warn "Hostname in certificate didn't match. Please try again later."
+    log.info "Logitech Harmony - Error: $e"
 	}
     return null
 }
@@ -419,9 +419,11 @@ def addDevice() {
         def d = getChildDevice(dni)
         if(!d) {
             def newAction = state.HarmonyActivities.find { it.key == dni }
-            d = addChildDevice("smartthings", "Harmony Activity", dni, null, [label:"${newAction.value} [Harmony Activity]"])
-            log.trace "created ${d.displayName} with id $dni"
-            poll()
+            if (newAction) {
+	            d = addChildDevice("smartthings", "Harmony Activity", dni, null, [label:"${newAction.value} [Harmony Activity]"])
+	            log.trace "created ${d.displayName} with id $dni"
+	            poll()
+            }
         } else {
             log.trace "found ${d.displayName} with id $dni already exists"
         }
@@ -472,7 +474,7 @@ def activity(dni,mode) {
 def poll() {
 	// GET THE LIST OF ACTIVITIES
     if (state.HarmonyAccessToken) {
-    	getActivityList()
+    	  getActivityList()
         def Params = [auth: state.HarmonyAccessToken]
         def url = "https://home.myharmony.com/cloudapi/state?${toQueryString(Params)}"
         try {
@@ -518,14 +520,17 @@ def poll() {
                 return "Poll completed $map - $state.hubs"
             }
         } catch (groovyx.net.http.HttpResponseException e) {
-            if (e.statusCode == 401) { // token is expired
-                state.remove("HarmonyAccessToken")
-                return "Harmony Access token has expired"
-            }
-		} catch(Exception e) {
-        	log.trace e
-		}
-	}
+              if (e.statusCode == 401) { // token is expired
+                  state.remove("HarmonyAccessToken")
+                  log.warn "Harmony Access token has expired"
+              }
+        } catch (java.net.SocketTimeoutException e) {
+        	log.warn "Connection to the hub timed out. Please restart the hub and try again."
+              state.resethub = true
+        } catch (e) {
+        	log.info "Logitech Harmony - Error: $e"
+        }
+    }
 }
 
 
