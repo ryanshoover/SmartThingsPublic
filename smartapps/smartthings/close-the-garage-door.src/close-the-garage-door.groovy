@@ -28,37 +28,34 @@ preferences {
 	section("When the garage door is open...") {
 		input "multisensor", "capability.threeAxis", title: "Which?"
 	}
-	section("For too long...") {
+	section("For how long...") {
 		input "maxOpenTime", "number", title: "Minutes?"
 	}
 }
 
-def installed()
-{
+def installed() {
 	subscribe(multisensor, "acceleration", accelerationHandler)
 }
 
-def updated()
-{
+def updated() {
 	unsubscribe()
 	subscribe(multisensor, "acceleration", accelerationHandler)
 }
 
 def accelerationHandler(evt) {
 	def latestThreeAxisState = multisensor.threeAxisState // e.g.: 0,0,-1000
+
 	if (latestThreeAxisState) {
-		def isOpen = Math.abs(latestThreeAxisState.xyzValue.z) > 500 // TODO: Test that this value works in most cases...
+		def isOpen = Math.abs(latestThreeAxisState.xyzValue.x) > 500 // TODO: Test that this value works in most cases...
 
 		if (!isOpen) {
-			clearSmsHistory()
-			clearStatus()
+			state.status = "closed"
 		}
 
 		if (isOpen) {
-			runIn(maxOpenTime * 60, takeAction)
-			state.status = "scheduled"
+			state.status = "open"
+			runIn(maxOpenTime * 60, takeAction, [overwrite: true])
 		}
-
 	}
 	else {
 		log.warn "COULD NOT FIND LATEST 3-AXIS STATE FOR: ${multisensor}"
@@ -66,54 +63,20 @@ def accelerationHandler(evt) {
 }
 
 def takeAction(){
-	if (state.status == "scheduled")
-	{
-		def deltaMillis = 1000 * 60 * maxOpenTime
-		def timeAgo = new Date(now() - deltaMillis)
-		def openTooLong = multisensor.threeAxisState.dateCreated.toSystemDate() < timeAgo
-
-		def recentTexts = state.smsHistory.find { it.sentDate.toSystemDate() > timeAgo }
-
-		if (!recentTexts) {
-			sendTextMessage()
-		}
-	} else {
-		log.trace "Status is no longer scheduled. Not sending text."
+	if (state.status == "open") {
+		sendTextMessage()
 	}
 }
 
 def sendTextMessage() {
 	log.debug "$multisensor was open too long, texting $phone"
 
-	updateSmsHistory()
-	def openMinutes = maxOpenTime * (state.smsHistory?.size() ?: 1)
+	def openMinutes = maxOpenTime
 	def msg = "Your ${multisensor.label ?: multisensor.name} has been open for more than ${openMinutes} minutes!"
     if (location.contactBookEnabled) {
         sendNotificationToContacts(msg, recipients)
     }
     else {
-        if (phone) {
-            sendSms(phone, msg)
-        } else {
-            sendPush msg
-        }
+		sendPush msg
     }
-}
-
-def updateSmsHistory() {
-	if (!state.smsHistory) state.smsHistory = []
-
-	if(state.smsHistory.size() > 9) {
-		log.debug "SmsHistory is too big, reducing size"
-		state.smsHistory = state.smsHistory[-9..-1]
-	}
-	state.smsHistory << [sentDate: new Date().toSystemFormat()]
-}
-
-def clearSmsHistory() {
-	state.smsHistory = null
-}
-
-def clearStatus() {
-	state.status = null
 }
